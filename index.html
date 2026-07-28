@@ -508,10 +508,13 @@ function renderOpen(){
 }
 function highlight(text,q){text=esc(text||'');if(!q)return text;try{return text.replace(new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'),'<mark style="background:rgba(56,189,248,.35);color:#fff;border-radius:3px">$1</mark>')}catch(e){return text}}
 function fileChip(r){return attCount(r)?`<span class="att-chip">📎 ${attCount(r)}</span>`:'<span style="color:var(--dim)">—</span>'}
+const RENDER_LIMIT=300;
 function renderLog(){
-  const rows=filtered();const q=flt.search.trim();
+  const all=filtered();const q=flt.search.trim();
+  const rows=all.slice(0,RENDER_LIMIT);
   $('logPill').textContent=records.length;
-  $('resultInfo').textContent=`Showing ${rows.length} of ${records.length} entries · newest first`+(flt.from||flt.to?` · ${flt.from||'start'} → ${flt.to||'now'}`:'');
+  const capped=all.length>RENDER_LIMIT?` · showing first ${RENDER_LIMIT} (refine search/date to narrow)`:'';
+  $('resultInfo').textContent=`Showing ${all.length} of ${records.length} entries · newest first`+(flt.from||flt.to?` · ${flt.from||'start'} → ${flt.to||'now'}`:'')+capped;
   $('tbody').innerHTML=rows.length?rows.map(r=>`
     <tr class="${r.status==='open'?'open-row':''}" data-id="${esc(r.id)}">
       <td class="td-date">${fmtDate(r.date)}</td>
@@ -689,7 +692,7 @@ function startVoice(targetId,btn){
   recog=new SR();recog.lang='en-NZ';recog.continuous=true;recog.interimResults=true;
   recTarget=$(targetId);recBtn=btn;recBase=recTarget.value?recTarget.value+' ':'';
   btn.classList.add('rec');$('voiceHint').textContent='🎙 Listening... speak now. Tap the mic again to stop.';
-  recog.onresult=e=>{let fin='',intr='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)fin+=t;else intr+=t;}if(fin)recBase+=fin;recTarget.value=(recBase+intr).replace(/\s+/g,' ').trimStart();};
+  recog.onresult=e=>{let fin='',intr='';for(let i=0;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)fin+=t+' ';else intr+=t;}recTarget.value=(recBase+fin+intr).replace(/\s+/g,' ').trimStart();};
   recog.onerror=e=>{toast('Voice error: '+e.error,'err');stopVoice();};
   recog.onend=()=>{if(recog)stopVoice();};
   try{recog.start()}catch(e){}
@@ -775,7 +778,8 @@ $('syncDot').onclick=()=>{if(lastError||$('syncDot').textContent.includes('offli
 $('yearlyTrendBtn').onclick=openTrend;
 $('trendClose').onclick=closeTrend;
 $('trendModal').onclick=e=>{if(e.target.id==='trendModal')closeTrend()};
-$('fSearch').addEventListener('input',e=>{flt.search=e.target.value;renderLog()});
+let searchT=null;
+$('fSearch').addEventListener('input',e=>{flt.search=e.target.value;clearTimeout(searchT);searchT=setTimeout(renderLog,140);});
 $('fFrom').addEventListener('change',e=>{flt.from=e.target.value;flt.range='';document.querySelectorAll('#quickRanges button[data-range]').forEach(x=>x.classList.remove('active'));renderLog()});
 $('fTo').addEventListener('change',e=>{flt.to=e.target.value;flt.range='';document.querySelectorAll('#quickRanges button[data-range]').forEach(x=>x.classList.remove('active'));renderLog()});
 $('fStatus').addEventListener('change',e=>{flt.status=e.target.value;renderLog()});
