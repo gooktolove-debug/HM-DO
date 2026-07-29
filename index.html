@@ -370,7 +370,6 @@ tbody tr.open-row:hover{background:linear-gradient(90deg,rgba(244,63,94,.22),tra
       </div>
     </div>
     <div class="modal-foot">
-      <button class="danger" id="deleteBtn" style="display:none">🗑 Delete</button>
       <div class="right">
         <button class="ghost" id="cancelBtn">Cancel</button>
         <button class="primary" id="saveBtn">💾 Save Entry</button>
@@ -624,7 +623,6 @@ function openModal(rec){
   editAttachments=rec&&Array.isArray(rec.attachments)?rec.attachments.map(a=>({...a})):[];
   removedPaths=[];
   $('editTitle').textContent=rec?'Edit Log Entry':'New Log Entry';
-  $('deleteBtn').style.display=rec?'inline-flex':'none';
   $('eDate').value=rec?rec.date:localISODate();
   $('eOfficer').value=rec?(rec.officer||''):officerDefault();
   $('eIncident').value=rec?rec.incident||'':'';
@@ -681,17 +679,6 @@ async function saveEntry(){
     await fetchAll();closeModal();toast(editingId?'Entry updated ✓':'New entry logged ✓','ok');
   }catch(e){console.error(e);toast('Save failed: '+(e.message||e),'err');}
   finally{btn.disabled=false;btn.textContent=orig;}
-}
-async function deleteEntry(){
-  if(!editingId)return;if(!confirm('Delete this log entry? This cannot be undone.'))return;
-  const btn=$('deleteBtn');btn.disabled=true;
-  try{
-    const paths=(editAttachments||[]).map(a=>a.path).filter(Boolean);
-    if(paths.length){try{await sbClient.storage.from(BUCKET).remove(paths);}catch(e){}}
-    const {error}=await sbClient.from(TABLE).delete().eq('id',editingId);if(error)throw error;
-    await fetchAll();closeModal();toast('Entry deleted','ok');
-  }catch(e){toast('Delete failed: '+(e.message||e),'err');}
-  finally{btn.disabled=false;}
 }
 
 /* ============ Voice ============ */
@@ -769,7 +756,7 @@ document.addEventListener('click',e=>{
 });
 $('fabNew').onclick=()=>openModal(null);
 $('editClose').onclick=closeModal;$('cancelBtn').onclick=closeModal;
-$('saveBtn').onclick=saveEntry;$('deleteBtn').onclick=deleteEntry;
+$('saveBtn').onclick=saveEntry;
 $('editModal').onclick=e=>{if(e.target.id==='editModal')closeModal()};
 document.querySelectorAll('#statusToggle button').forEach(b=>b.onclick=()=>setModalStatus(b.dataset.status));
 document.querySelectorAll('.mic').forEach(b=>b.onclick=()=>startVoice(b.dataset.target,b));
