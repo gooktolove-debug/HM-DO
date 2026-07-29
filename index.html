@@ -684,20 +684,66 @@ async function deleteEntry(){
 }
 
 /* ============ Voice ============ */
-let recog=null,recTarget=null,recBtn=null,recBase='';
+let recog=null,recTarget=null,recBtn=null,recBase='',recFinal='';
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 function startVoice(targetId,btn){
   if(!SR){toast('Voice not supported here — use the keyboard mic on mobile.','err');return}
   if(recog){stopVoice();return}
-  recog=new SR();recog.lang='en-NZ';recog.continuous=true;recog.interimResults=true;
-  recTarget=$(targetId);recBtn=btn;recBase=recTarget.value?recTarget.value+' ':'';
-  btn.classList.add('rec');$('voiceHint').textContent='🎙 Listening... speak now. Tap the mic again to stop.';
-  recog.onresult=e=>{let fin='',intr='';for(let i=0;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)fin+=t+' ';else intr+=t;}recTarget.value=(recBase+fin+intr).replace(/\s+/g,' ').trimStart();};
-  recog.onerror=e=>{toast('Voice error: '+e.error,'err');stopVoice();};
-  recog.onend=()=>{if(recog)stopVoice();};
-  try{recog.start()}catch(e){}
+
+  const session=new SR();
+  recog=session;
+  session.lang='en-NZ';
+  session.continuous=true;
+  session.interimResults=true;
+  recTarget=$(targetId);
+  recBtn=btn;
+  recBase=recTarget.value.trim();
+  recFinal='';
+
+  btn.classList.add('rec');
+  $('voiceHint').textContent='🎙 Listening... speak now. Tap the mic again to stop.';
+
+  session.onresult=e=>{
+    // SpeechRecognition results are cumulative. Only process newly changed
+    // results, otherwise previously finalised words are appended repeatedly.
+    let interim='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const transcript=e.results[i][0].transcript.trim();
+      if(!transcript)continue;
+      if(e.results[i].isFinal)recFinal+=(recFinal?' ':'')+transcript;
+      else interim+=(interim?' ':'')+transcript;
+    }
+    const parts=[recBase,recFinal,interim].filter(Boolean);
+    if(recTarget)recTarget.value=parts.join(' ').replace(/\s+/g,' ').trim();
+  };
+
+  session.onerror=e=>{
+    // "aborted" is expected when the user taps the mic to stop.
+    if(e.error!=='aborted')toast('Voice error: '+e.error,'err');
+    finishVoiceSession(session);
+  };
+  session.onend=()=>finishVoiceSession(session);
+
+  try{session.start()}catch(e){
+    toast('Could not start voice input. Please try again.','err');
+    finishVoiceSession(session);
+  }
 }
-function stopVoice(){if(recog){try{recog.stop()}catch(e){}recog=null;}if(recBtn){recBtn.classList.remove('rec');recBtn=null;}$('voiceHint').textContent='🎤 Tap a mic to dictate. Tap again to stop. (Chrome / Edge / Android; on iPhone use the keyboard mic.)';}
+function finishVoiceSession(session){
+  // Ignore a late onend/onerror event from an older recognition session.
+  if(recog!==session)return;
+  recog=null;
+  if(recBtn)recBtn.classList.remove('rec');
+  recBtn=null;recTarget=null;recBase='';recFinal='';
+  $('voiceHint').textContent='🎤 Tap a mic to dictate. Tap again to stop. (Chrome / Edge / Android; on iPhone use the keyboard mic.)';
+}
+function stopVoice(){
+  const session=recog;
+  if(!session)return;
+  try{session.stop()}catch(e){finishVoiceSession(session);}
+  // onend normally performs cleanup; this fallback covers browsers that do not.
+  setTimeout(()=>finishVoiceSession(session),500);
+}
 
 /* ============ Export / Import ============ */
 function download(name,content,type){const b=new Blob([content],{type});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}
