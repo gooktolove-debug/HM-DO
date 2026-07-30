@@ -190,10 +190,13 @@ tbody tr.open-row:hover{background:linear-gradient(90deg,rgba(244,63,94,.22),tra
 .toast.ok{border-color:rgba(16,185,129,.5)} .toast.err{border-color:var(--redline)}
 .toolbar{display:flex;gap:9px;flex-wrap:wrap}
 
-.lightbox{position:fixed;inset:0;background:rgba(3,7,18,.9);display:none;align-items:center;justify-content:center;z-index:400;padding:24px}
+.lightbox{position:fixed;inset:0;background:rgba(3,7,18,.9);display:none;align-items:center;justify-content:center;z-index:400;padding:24px;overflow:hidden;cursor:zoom-in;touch-action:none;user-select:none}
 .lightbox.open{display:flex}
-.lightbox img{max-width:96vw;max-height:92vh;border-radius:12px;box-shadow:var(--shadow)}
-.lightbox .lb-close{position:absolute;top:18px;right:18px}
+.lightbox img{max-width:96vw;max-height:92vh;border-radius:12px;box-shadow:var(--shadow);transform-origin:0 0;will-change:transform;pointer-events:none;-webkit-user-drag:none}
+.lightbox.zoomed{cursor:grab}
+.lightbox.dragging{cursor:grabbing}
+.lightbox .lb-close{position:absolute;top:18px;right:18px;z-index:2}
+.lightbox .lb-zoom-hint{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:2;padding:7px 12px;border:1px solid var(--line2);border-radius:999px;background:rgba(6,11,22,.72);color:var(--muted);font-size:12px;font-weight:700;pointer-events:none;transition:opacity .2s}
 
 @media(max-width:1080px){.filters{grid-template-columns:1fr 1fr 1fr}}
 @media(max-width:900px){
@@ -393,7 +396,7 @@ tbody tr.open-row:hover{background:linear-gradient(90deg,rgba(244,63,94,.22),tra
   </div>
 </div>
 
-<div class="lightbox" id="lightbox"><button class="sm ghost lb-close" id="lbClose">✕ Close</button><img id="lbImg" src="" alt=""></div>
+<div class="lightbox" id="lightbox"><button class="sm ghost lb-close" id="lbClose">✕ Close</button><img id="lbImg" src="" alt=""><div class="lb-zoom-hint" id="lbZoomHint">Mouse wheel: zoom · Drag: move · Double-click: reset</div></div>
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -610,7 +613,7 @@ function renderAttachEditor(){
 function openAttachment(a){
   const src=a.url||a.previewUrl||(a.blob?URL.createObjectURL(a.blob):null);
   if(!src)return;
-  if((a.type||'').startsWith('image/')){$('lbImg').src=src;$('lightbox').classList.add('open');}
+  if((a.type||'').startsWith('image/')){resetLightboxZoom();$('lbImg').src=src;$('lightbox').classList.add('open');}
   else{const w=window.open(src,'_blank');if(!w){const l=document.createElement('a');l.href=src;l.download=a.name||'file';l.click();}}
 }
 
@@ -769,8 +772,47 @@ $('attachList').addEventListener('click',e=>{
   if(del){e.stopPropagation();const i=+del.dataset.del;const a=editAttachments[i];if(a){if(a.path)removedPaths.push(a.path);if(a.previewUrl)try{URL.revokeObjectURL(a.previewUrl)}catch(x){}}editAttachments.splice(i,1);renderAttachEditor();return;}
   const view=e.target.closest('[data-view]');if(view){openAttachment(editAttachments[+view.dataset.view]);}
 });
-$('lbClose').onclick=()=>$('lightbox').classList.remove('open');
-$('lightbox').onclick=e=>{if(e.target.id==='lightbox')$('lightbox').classList.remove('open')};
+// Lightbox mouse-wheel zoom and drag-to-pan
+const lbState={scale:1,x:0,y:0,dragging:false,startX:0,startY:0,baseX:0,baseY:0};
+function applyLightboxTransform(){
+  $('lbImg').style.transform=`translate(${lbState.x}px,${lbState.y}px) scale(${lbState.scale})`;
+  $('lightbox').classList.toggle('zoomed',lbState.scale>1.001);
+  $('lbZoomHint').style.opacity=lbState.scale>1.001?'0':'1';
+}
+function resetLightboxZoom(){lbState.scale=1;lbState.x=0;lbState.y=0;lbState.dragging=false;applyLightboxTransform();}
+function closeLightbox(){$('lightbox').classList.remove('open','dragging');resetLightboxZoom();}
+$('lbClose').onclick=closeLightbox;
+$('lightbox').addEventListener('wheel',e=>{
+  if(!$('lightbox').classList.contains('open'))return;
+  e.preventDefault();
+  const oldScale=lbState.scale;
+  const factor=Math.exp(-e.deltaY*0.0015);
+  const newScale=Math.min(8,Math.max(1,oldScale*factor));
+  if(newScale===oldScale)return;
+  const img=$('lbImg');
+  const rect=img.getBoundingClientRect();
+  const originX=(e.clientX-rect.left)/oldScale;
+  const originY=(e.clientY-rect.top)/oldScale;
+  lbState.x-=originX*(newScale-oldScale);
+  lbState.y-=originY*(newScale-oldScale);
+  lbState.scale=newScale;
+  if(newScale===1){lbState.x=0;lbState.y=0;}
+  applyLightboxTransform();
+},{passive:false});
+$('lightbox').addEventListener('pointerdown',e=>{
+  if(e.target.closest('.lb-close')||lbState.scale<=1)return;
+  lbState.dragging=true;lbState.startX=e.clientX;lbState.startY=e.clientY;lbState.baseX=lbState.x;lbState.baseY=lbState.y;
+  $('lightbox').classList.add('dragging');$('lightbox').setPointerCapture(e.pointerId);e.preventDefault();
+});
+$('lightbox').addEventListener('pointermove',e=>{
+  if(!lbState.dragging)return;
+  lbState.x=lbState.baseX+(e.clientX-lbState.startX);lbState.y=lbState.baseY+(e.clientY-lbState.startY);applyLightboxTransform();
+});
+function endLightboxDrag(e){if(!lbState.dragging)return;lbState.dragging=false;$('lightbox').classList.remove('dragging');try{$('lightbox').releasePointerCapture(e.pointerId)}catch(x){}}
+$('lightbox').addEventListener('pointerup',endLightboxDrag);
+$('lightbox').addEventListener('pointercancel',endLightboxDrag);
+$('lightbox').addEventListener('dblclick',e=>{if(!e.target.closest('.lb-close'))resetLightboxZoom();});
+$('lightbox').onclick=e=>{if(e.target.id==='lightbox'&&lbState.scale===1)closeLightbox()};
 $('refreshBtn').onclick=fetchAll;
 $('syncDot').onclick=()=>{if(lastError||$('syncDot').textContent.includes('offline'))showDiag();};
 $('yearlyTrendBtn').onclick=openTrend;
@@ -787,7 +829,7 @@ $('clearFilters').onclick=()=>{flt.search='';flt.status='all';flt.officer='all';
 $('exportCsvBtn').onclick=exportCsv;
 $('importBtn').onclick=()=>$('importFile').click();
 $('importFile').onchange=e=>{if(e.target.files[0])importFile(e.target.files[0]);e.target.value='';};
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('lightbox').classList.contains('open'))$('lightbox').classList.remove('open');else if($('trendModal').classList.contains('open'))closeTrend();else if($('editModal').classList.contains('open'))closeModal();}if((e.ctrlKey||e.metaKey)&&e.key==='Enter'&&$('editModal').classList.contains('open'))saveEntry();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('lightbox').classList.contains('open'))closeLightbox();else if($('trendModal').classList.contains('open'))closeTrend();else if($('editModal').classList.contains('open'))closeModal();}if((e.ctrlKey||e.metaKey)&&e.key==='Enter'&&$('editModal').classList.contains('open'))saveEntry();});
 
 /* ============ Init ============ */
 function init(){
